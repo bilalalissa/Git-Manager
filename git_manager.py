@@ -881,7 +881,7 @@ def menu():
         
     while True:
         print("\nGit Manager Menu:")
-        print("1. Track Files")
+        print("1. Add Tracked Files")
         print("2. Show Tracked Files")
         print("3. Remove Files from Tracking\n")
         print("4. Show Git Configuration")
