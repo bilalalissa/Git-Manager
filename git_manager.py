@@ -93,28 +93,33 @@ def check_gitignore(file_name):
 def track_files():
     """Enhanced file tracking with pattern support and status feedback."""
     config = load_config()
-    files_added = []  # Track newly added files
-    
-    print("\nCurrent tracking mode:", "All files" if config["tracked_files"] == "all" else "Selected files")
-    if isinstance(config["tracked_files"], list):
-        print("Currently tracked files:", ", ".join(config["tracked_files"]) or "None")
+    files_added = []
     
     while True:
+        print("\nCurrent tracking mode:", "All files" if config["tracked_files"] == "all" else "Selected files")
+        if isinstance(config["tracked_files"], list):
+            print("Currently tracked files:", ", ".join(config["tracked_files"]) or "None")
+        
         print("\nTracking options:")
         print("1. Track specific file")
         print("2. Track by pattern (e.g., *.py)")
         print("3. Track all files")
-        print("4. Done")
+        print("4. Return to main menu")
         
         choice = input("\nSelect option: ")
+        
         if choice == "1":
-            file_name = input("Enter file name: ")
+            file_name = input("Enter file name (or 'b' to go back): ").strip()
+            if file_name.lower() == 'b':
+                continue
+                
             if os.path.exists(file_name):
                 if check_gitignore(file_name):
                     print(f"\nWarning: {file_name} is in .gitignore")
                     confirm = input("Do you still want to track this file? (y/n): ")
                     if confirm.lower() != 'y':
                         continue
+                        
                 if isinstance(config["tracked_files"], list):
                     if file_name not in config["tracked_files"]:
                         try:
@@ -125,23 +130,31 @@ def track_files():
                                 check=True,
                                 capture_output=True
                             )
+                            
+                            # Update tracking list and save immediately
                             config["tracked_files"].append(file_name)
                             files_added.append(file_name)
-                            print(f"Added {file_name} to tracking")
-                            log_operation("Tracking", "SUCCESS", f"Added {file_name}")
+                            if save_config(config):
+                                print(f"\nAdded {file_name} to tracking")
+                                log_operation("Tracking", "SUCCESS", f"Added {file_name}")
+                            else:
+                                print("\nFailed to save configuration")
+                                log_operation("Tracking", "ERROR", "Failed to save configuration")
                         except subprocess.CalledProcessError as e:
-                            print(f"Error adding {file_name}: {str(e)}")
+                            print(f"\nError adding {file_name}: {str(e)}")
                             log_operation("Tracking", "ERROR", f"Failed to add {file_name}: {str(e)}")
                     else:
-                        print(f"{file_name} is already being tracked")
+                        print(f"\n{file_name} is already being tracked")
                 else:
-                    print("All files are currently being tracked")
+                    print("\nAll files are currently being tracked")
             else:
-                print("File not found")
-                log_operation("Tracking", "ERROR", f"File not found: {file_name}")
+                print("\nFile not found")
                 
         elif choice == "2":
-            pattern = input("Enter file pattern (e.g., *.py): ")
+            pattern = input("Enter file pattern (e.g., *.py) or 'b' to go back: ").strip()
+            if pattern.lower() == 'b':
+                continue
+                
             matched_files = glob.glob(pattern)
             if matched_files:
                 print(f"\nFound {len(matched_files)} matching files:")
@@ -149,50 +162,60 @@ def track_files():
                     print(f"- {file}")
                 if len(matched_files) > 5:
                     print(f"... and {len(matched_files)-5} more")
+                    
                 confirm = input("\nAdd these files to tracking? (y/n): ")
                 if confirm.lower() == 'y':
                     for file in matched_files:
-                        try:
-                            # Stage each file
-                            subprocess.run(
-                                f"git add {file}",
-                                shell=True,
-                                check=True,
-                                capture_output=True
-                            )
-                            if file not in config["tracked_files"]:
+                        if file not in config["tracked_files"]:
+                            try:
+                                subprocess.run(
+                                    f"git add {file}",
+                                    shell=True,
+                                    check=True,
+                                    capture_output=True
+                                )
                                 config["tracked_files"].append(file)
                                 files_added.append(file)
-                        except subprocess.CalledProcessError as e:
-                            print(f"Error adding {file}: {str(e)}")
-                            log_operation("Tracking", "ERROR", f"Failed to add {file}: {str(e)}")
-                    log_operation("Tracking", "SUCCESS", f"Added {len(files_added)} files matching {pattern}")
+                            except subprocess.CalledProcessError as e:
+                                print(f"\nError adding {file}: {str(e)}")
+                                
+                    if files_added:
+                        if save_config(config):
+                            print(f"\nAdded {len(files_added)} files to tracking")
+                            log_operation("Tracking", "SUCCESS", f"Added {len(files_added)} files")
+                        else:
+                            print("\nFailed to save configuration")
             else:
-                print("No files match the pattern")
-                log_operation("Tracking", "WARNING", f"No files match pattern: {pattern}")
+                print("\nNo files match the pattern")
                 
         elif choice == "3":
-            try:
-                subprocess.run(
-                    "git add .",
-                    shell=True,
-                    check=True,
-                    capture_output=True
-                )
-                config["tracked_files"] = "all"
-                print("Now tracking all files")
-                log_operation("Tracking", "SUCCESS", "Switched to tracking all files")
-            except subprocess.CalledProcessError as e:
-                print(f"Error adding files: {str(e)}")
-                log_operation("Tracking", "ERROR", f"Failed to track all files: {str(e)}")
-                
+            confirm = input("\nTrack all files in repository? (y/n): ")
+            if confirm.lower() == 'y':
+                try:
+                    subprocess.run(
+                        "git add .",
+                        shell=True,
+                        check=True,
+                        capture_output=True
+                    )
+                    config["tracked_files"] = "all"
+                    if save_config(config):
+                        print("\nNow tracking all files")
+                        log_operation("Tracking", "SUCCESS", "Switched to tracking all files")
+                    else:
+                        print("\nFailed to save configuration")
+                except subprocess.CalledProcessError as e:
+                    print(f"\nError adding files: {str(e)}")
+                    
         elif choice == "4":
             break
-    
-    # Save configuration and commit changes
-    if files_added and save_config(config):
+            
+        else:
+            print("\nInvalid choice")
+            
+    # Commit and push changes if files were added
+    if files_added:
         try:
-            # Commit the changes
             files_list = ", ".join(files_added)
             subprocess.run(
                 f'git commit -m "Added to tracking: {files_list}"',
@@ -200,19 +223,15 @@ def track_files():
                 check=True,
                 capture_output=True
             )
-            
-            # Push to remote
             subprocess.run(
                 "git push origin main",
                 shell=True,
                 check=True,
                 capture_output=True
             )
-            
             print("\nChanges committed and pushed to remote successfully")
-            log_operation("Tracking", "SUCCESS", f"Committed and pushed {len(files_added)} new files")
         except subprocess.CalledProcessError as e:
-            print(f"\nError syncing changes with remote: {str(e)}")
+            print(f"\nError syncing with remote: {str(e)}")
             log_operation("Tracking", "ERROR", f"Failed to sync changes: {str(e)}")
 
 def edit_config():
