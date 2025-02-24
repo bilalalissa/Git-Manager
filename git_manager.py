@@ -9,11 +9,15 @@ import platform
 import requests
 import logging
 from datetime import datetime
+from backup_manager import BackupManager
+import glob
 
 CONFIG_FILE = "tracked_files.json"
 ENCRYPTION_KEY_FILE = "encryption.key"
 SERVICE_FILE = "/etc/systemd/system/git-tracker.service" if platform.system() == "Linux" else "git-tracker.bat"
 GITHUB_API_URL = "https://api.github.com/user/repos"
+
+BACKUP_MANAGER = BackupManager(CONFIG_FILE, ENCRYPTION_KEY_FILE)
 
 def generate_key():
     """Generates and saves an encryption key if it doesn't exist."""
@@ -74,44 +78,54 @@ def reset_config():
     print("\n\t== >Git Manager configuration has been reset.\n")
 
 def track_files():
-    """Allows user to add files to Git tracking."""
+    """Enhanced file tracking with pattern support and status feedback."""
     config = load_config()
-    files_added = False
+    print("\nCurrent tracking mode:", "All files" if config["tracked_files"] == "all" else "Selected files")
+    if isinstance(config["tracked_files"], list):
+        print("Currently tracked files:", ", ".join(config["tracked_files"]) or "None")
     
     while True:
-        file_name = input("\nEnter file to track \n(or type 'all' to track all files, 'done' to finish): ")
-        if file_name.lower() == "done":
-            break
-        elif file_name.lower() == "all":
-            try:
-                result = subprocess.run("git add .", shell=True, check=True, capture_output=True, text=True)
-                if result.returncode == 0:
-                    config["tracked_files"] = "all"
-                    files_added = True
-                    print("\nAll files have been staged for tracking")
-                break
-            except subprocess.CalledProcessError as e:
-                print(f"\nError adding files: {e.stderr}")
-        elif os.path.exists(file_name):
-            try:
-                result = subprocess.run(f"git add {file_name}", shell=True, check=True, capture_output=True, text=True)
-                if result.returncode == 0:
+        print("\nTracking options:")
+        print("1. Track specific file")
+        print("2. Track by pattern (e.g., *.py)")
+        print("3. Track all files")
+        print("4. Done")
+        
+        choice = input("\nSelect option: ")
+        if choice == "1":
+            file_name = input("Enter file name: ")
+            if os.path.exists(file_name):
+                if isinstance(config["tracked_files"], list):
                     config["tracked_files"].append(file_name)
-                    files_added = True
-                    print(f"\nAdded {file_name} to tracking")
-            except subprocess.CalledProcessError as e:
-                print(f"\nError adding {file_name}: {e.stderr}")
-        else:
-            print("\nFile not found.\n")
+                    print(f"Added {file_name} to tracking")
+                    log_operation("Tracking", "SUCCESS", f"Added {file_name}")
+            else:
+                print("File not found")
+                log_operation("Tracking", "ERROR", f"File not found: {file_name}")
+        elif choice == "2":
+            pattern = input("Enter file pattern (e.g., *.py): ")
+            matched_files = glob.glob(pattern)
+            if matched_files:
+                print(f"\nFound {len(matched_files)} matching files:")
+                for file in matched_files[:5]:
+                    print(f"- {file}")
+                if len(matched_files) > 5:
+                    print(f"... and {len(matched_files)-5} more")
+                confirm = input("\nAdd these files to tracking? (y/n): ")
+                if confirm.lower() == 'y':
+                    config["tracked_files"].extend(matched_files)
+                    log_operation("Tracking", "SUCCESS", f"Added {len(matched_files)} files matching {pattern}")
+            else:
+                print("No files match the pattern")
+                log_operation("Tracking", "WARNING", f"No files match pattern: {pattern}")
+        elif choice == "3":
+            config["tracked_files"] = "all"
+            print("Now tracking all files")
+            log_operation("Tracking", "SUCCESS", "Switched to tracking all files")
+        elif choice == "4":
+            break
     
-    if files_added:
-        save_config(config)
-        # Commit the changes
-        try:
-            subprocess.run('git commit -m "Added new files to tracking"', shell=True, check=True)
-            print("\nChanges committed successfully")
-        except subprocess.CalledProcessError as e:
-            print(f"\nError committing changes: {e.stderr}")
+    save_config(config)
 
 def edit_config():
     """Allows user to modify the encrypted JSON configuration."""
@@ -719,7 +733,10 @@ def menu():
         print("11. Show Repository Status")
         print("12. Sync with Remote")
         print("13. Show Recent Logs")
-        print("14. Exit")
+        print("14. Resolve Conflicts")
+        print("15. Backup Management")
+        print("16. Detailed Status")
+        print("17. Exit")
         
         choice = input("\nEnter your choice: ")
         
@@ -750,6 +767,12 @@ def menu():
         elif choice == "13":
             show_recent_logs()
         elif choice == "14":
+            resolve_conflicts()
+        elif choice == "15":
+            backup_menu()
+        elif choice == "16":
+            detailed_status()
+        elif choice == "17":
             print("\n\t... Exiting Git Manager ...\n")
             break
         else:
@@ -808,6 +831,209 @@ def show_recent_logs():
     if has_errors:
         print("\nNote: There are errors in the log that may need attention.")
     print()
+
+def detailed_status():
+    """Provides detailed repository status with actionable insights."""
+    start_time = time.time()
+    
+    print("\nRepository Health Check")
+    print("======================")
+    
+    # Local changes
+    local_changes = subprocess.run(
+        "git status --porcelain",
+        shell=True, capture_output=True, text=True
+    ).stdout
+    
+    if local_changes:
+        print("\nLocal Changes:")
+        for line in local_changes.splitlines():
+            status, file = line[:2], line[3:]
+            if status == "M ":
+                print(f"Modified: {file}")
+            elif status == "A ":
+                print(f"Added: {file}")
+            elif status == "D ":
+                print(f"Deleted: {file}")
+    else:
+        print("\nWorking directory clean")
+    
+    # Remote status
+    try:
+        subprocess.run("git fetch", shell=True, capture_output=True)
+        ahead = subprocess.run(
+            "git rev-list HEAD..origin/main --count",
+            shell=True, capture_output=True, text=True
+        ).stdout.strip()
+        behind = subprocess.run(
+            "git rev-list origin/main..HEAD --count",
+            shell=True, capture_output=True, text=True
+        ).stdout.strip()
+        
+        print("\nRemote Status:")
+        if ahead != "0":
+            print(f"- {ahead} commits ahead of remote")
+        if behind != "0":
+            print(f"- {behind} commits behind remote")
+        if ahead == "0" and behind == "0":
+            print("- In sync with remote")
+    except:
+        print("- Unable to check remote status")
+    
+    duration = time.time() - start_time
+    log_operation("Status", "INFO", f"Status check completed in {duration:.2f} seconds")
+
+def resolve_conflicts():
+    """Interactive conflict resolution helper."""
+    # Check for conflicts
+    status = subprocess.run(
+        "git status",
+        shell=True,
+        capture_output=True,
+        text=True
+    ).stdout
+    
+    if "You have unmerged paths" not in status:
+        print("\nNo conflicts detected")
+        log_operation("Conflicts", "INFO", "No conflicts found")
+        return
+        
+    print("\nConflict Resolution Helper")
+    print("==========================")
+    log_operation("Conflicts", "INFO", "Starting conflict resolution")
+    
+    # Get conflicted files
+    conflicts = subprocess.run(
+        "git diff --name-only --diff-filter=U",
+        shell=True,
+        capture_output=True,
+        text=True
+    ).stdout.split()
+    
+    resolved_files = []
+    for file in conflicts:
+        print(f"\nResolving conflicts in {file}")
+        print("Options:")
+        print("1. Keep local version")
+        print("2. Keep remote version")
+        print("3. Show diff")
+        print("4. Edit manually")
+        print("5. Skip file")
+        
+        while True:
+            choice = input("\nSelect option: ")
+            
+            try:
+                if choice == "1":
+                    subprocess.run(f"git checkout --ours {file}", shell=True, check=True)
+                    subprocess.run(f"git add {file}", shell=True, check=True)
+                    resolved_files.append(file)
+                    log_operation("Conflicts", "SUCCESS", f"Kept local version of {file}")
+                    break
+                    
+                elif choice == "2":
+                    subprocess.run(f"git checkout --theirs {file}", shell=True, check=True)
+                    subprocess.run(f"git add {file}", shell=True, check=True)
+                    resolved_files.append(file)
+                    log_operation("Conflicts", "SUCCESS", f"Kept remote version of {file}")
+                    break
+                    
+                elif choice == "3":
+                    # Show colored diff
+                    subprocess.run(f"git diff --color {file}", shell=True)
+                    continue
+                    
+                elif choice == "4":
+                    print(f"\nPlease edit {file} manually.")
+                    print("After editing, mark as resolved? (y/n): ")
+                    if input().lower() == 'y':
+                        subprocess.run(f"git add {file}", shell=True, check=True)
+                        resolved_files.append(file)
+                        log_operation("Conflicts", "SUCCESS", f"Manually resolved {file}")
+                        break
+                    
+                elif choice == "5":
+                    log_operation("Conflicts", "INFO", f"Skipped {file}")
+                    break
+                    
+                else:
+                    print("Invalid choice")
+                    
+            except subprocess.CalledProcessError as e:
+                print(f"\nError resolving conflict: {str(e)}")
+                log_operation("Conflicts", "ERROR", f"Failed to resolve {file}: {str(e)}")
+    
+    if resolved_files:
+        try:
+            # Commit resolved conflicts
+            commit_msg = "Resolved conflicts in: " + ", ".join(resolved_files)
+            subprocess.run(
+                f'git commit -m "{commit_msg}"',
+                shell=True,
+                check=True
+            )
+            print("\nConflicts resolved and committed successfully")
+            log_operation("Conflicts", "SUCCESS", f"Committed resolutions for {len(resolved_files)} files")
+        except subprocess.CalledProcessError as e:
+            print(f"\nError committing resolved conflicts: {str(e)}")
+            log_operation("Conflicts", "ERROR", f"Failed to commit resolutions: {str(e)}")
+    else:
+        print("\nNo conflicts were resolved")
+        log_operation("Conflicts", "WARNING", "No conflicts resolved")
+
+def backup_menu():
+    """Displays backup management options."""
+    while True:
+        print("\nBackup Management:")
+        print("1. Create backup")
+        print("2. List backups")
+        print("3. Restore backup")
+        print("4. Return to main menu")
+        
+        choice = input("\nSelect option: ")
+        
+        if choice == "1":
+            backup_name = BACKUP_MANAGER.create_backup()
+            print(f"\nBackup created: {backup_name}")
+            log_operation("Backup", "SUCCESS", f"Created backup {backup_name}")
+            
+        elif choice == "2":
+            backups = BACKUP_MANAGER.list_backups()
+            if not backups:
+                print("\nNo backups found")
+            else:
+                print("\nAvailable backups:")
+                for timestamp, files in backups.items():
+                    print(f"\n{timestamp}:")
+                    for file in files:
+                        print(f"  - {file}")
+                        
+        elif choice == "3":
+            backups = BACKUP_MANAGER.list_backups()
+            if not backups:
+                print("\nNo backups available to restore")
+                continue
+                
+            print("\nAvailable backups:")
+            timestamps = list(backups.keys())
+            for i, timestamp in enumerate(timestamps, 1):
+                print(f"{i}. {timestamp}")
+                
+            try:
+                idx = int(input("\nSelect backup to restore (or 0 to cancel): ")) - 1
+                if idx == -1:
+                    continue
+                if 0 <= idx < len(timestamps):
+                    BACKUP_MANAGER.restore_backup(timestamps[idx])
+                    print("\nBackup restored successfully")
+                    log_operation("Backup", "SUCCESS", f"Restored backup {timestamps[idx]}")
+                else:
+                    print("\nInvalid selection")
+            except ValueError:
+                print("\nInvalid input")
+                
+        elif choice == "4":
+            break
 
 if __name__ == "__main__":
     menu()
