@@ -161,8 +161,9 @@ def edit_config():
     try:
         if choice == "1":
             # Toggle auto-commit
-            new_state = not config["auto_commit"]
-            if new_state:  # If enabling auto-commit
+            config["auto_commit"] = not config["auto_commit"]
+            
+            if config["auto_commit"]:  # If enabling auto-commit
                 interval = input("\nEnter commit interval in minutes (default: 30): ") or "30"
                 try:
                     config["commit_interval"] = int(interval)
@@ -170,9 +171,8 @@ def edit_config():
                     print("\nInvalid interval. Using default 30 minutes")
                     config["commit_interval"] = 30
                 
-                # Save configuration before starting thread
+                # Save configuration first
                 if save_config(config):
-                    config["auto_commit"] = new_state
                     print(f"\nAuto-Commit enabled with {config['commit_interval']} minute intervals")
                     
                     # Start auto-commit thread
@@ -180,33 +180,38 @@ def edit_config():
                     auto_commit_thread = threading.Thread(target=auto_commit_process, daemon=True)
                     auto_commit_thread.start()
                 else:
+                    # Revert changes if save failed
+                    config["auto_commit"] = False
                     print("\nFailed to save configuration. Auto-commit not enabled.")
-                    return
             else:  # If disabling auto-commit
-                config["auto_commit"] = False
                 if save_config(config):
                     print("\nAuto-Commit disabled")
                 else:
+                    # Revert changes if save failed
+                    config["auto_commit"] = True
                     print("\nFailed to save configuration")
-                    return
             
         elif choice == "2":
+            old_value = config["daemon_mode"]
             config["daemon_mode"] = not config["daemon_mode"]
             if save_config(config):
                 print(f"\nDaemon Mode {'Enabled' if config['daemon_mode'] else 'Disabled'}")
             else:
+                # Revert changes if save failed
+                config["daemon_mode"] = old_value
                 print("\nFailed to save configuration")
-                return
             
         elif choice == "3" and config["auto_commit"]:
+            old_interval = config["commit_interval"]
             interval = input("\nEnter new commit interval in minutes: ")
             try:
                 config["commit_interval"] = int(interval)
                 if save_config(config):
                     print(f"\nCommit interval updated to {interval} minutes")
                 else:
+                    # Revert changes if save failed
+                    config["commit_interval"] = old_interval
                     print("\nFailed to save configuration")
-                    return
             except ValueError:
                 print("\nInvalid interval. Keeping current setting.")
         else:
@@ -367,77 +372,107 @@ def show_repo_status():
     print("\n")
 
 def auto_commit_process():
-    """Handles automatic commits and pushes"""
+    """Handles automatic commits and pushes for tracked files only"""
     print("\nAuto-commit process started...")
+    error_count = 0  # Track consecutive errors
     
     while True:
         try:
             config = load_config()
             if not config["auto_commit"]:
-                print("\nAuto-commit disabled. Stopping process.")
-                break
+                print("\nAuto-commit disabled.")
+                return  # Exit the thread when auto-commit is disabled
                 
-            # Check for changes
-            status = subprocess.run(
-                "git status --porcelain",
-                shell=True,
-                capture_output=True,
-                text=True
-            )
+            # Get list of tracked files
+            tracked_files = config.get("tracked_files", [])
+            if not tracked_files:
+                time.sleep(config.get("commit_interval", 30) * 60)
+                continue
+                
+            # Check for changes in tracked files only
+            changes_detected = False
             
-            if status.stdout.strip():
-                print("\nChanges detected, processing...")
-                
+            if tracked_files == "all":
+                # If tracking all files, use git status
+                status = subprocess.run(
+                    "git status --porcelain",
+                    shell=True,
+                    capture_output=True,
+                    text=True
+                )
+                changes_detected = bool(status.stdout.strip())
+            else:
+                # Check specific tracked files
+                for file in tracked_files:
+                    if os.path.exists(file):
+                        file_status = subprocess.run(
+                            f"git status --porcelain {file}",
+                            shell=True,
+                            capture_output=True,
+                            text=True
+                        )
+                        if file_status.stdout.strip():
+                            changes_detected = True
+                            break
+            
+            if changes_detected:
                 try:
-                    # Fetch and merge any remote changes first
-                    subprocess.run("git fetch origin", shell=True, check=True)
-                    subprocess.run("git merge origin/main", shell=True, check=True)
-                    
-                    # Stage changes
-                    subprocess.run("git add .", shell=True, check=True)
-                    print("Changes staged...")
+                    if tracked_files == "all":
+                        # Stage all changes
+                        subprocess.run("git add .", shell=True, check=True, timeout=30)
+                    else:
+                        # Stage only tracked files
+                        for file in tracked_files:
+                            if os.path.exists(file):
+                                subprocess.run(
+                                    f"git add {file}",
+                                    shell=True,
+                                    check=True,
+                                    timeout=30
+                                )
                     
                     # Commit changes
                     subprocess.run(
-                        'git commit -m "Auto-commit: Changes detected"',
+                        'git commit -m "Auto-commit: Changes in tracked files"',
                         shell=True,
-                        check=True
+                        check=True,
+                        timeout=30
                     )
-                    print("Changes committed...")
                     
                     # Push changes
-                    push_cmd = subprocess.run(
+                    subprocess.run(
                         "git push origin main",
                         shell=True,
-                        capture_output=True,
-                        text=True
+                        check=True,
+                        timeout=30
                     )
                     
-                    if push_cmd.returncode == 0:
-                        print("Changes pushed successfully")
-                    else:
-                        print(f"Error pushing changes: {push_cmd.stderr}")
-                        # Try to push with force if normal push fails
-                        force_push = input("\nTry force push? (y/n): ")
-                        if force_push.lower() == 'y':
-                            subprocess.run(
-                                "git push -f origin main",
-                                shell=True,
-                                check=True
-                            )
-                            print("Changes force pushed successfully")
+                    print("\nTracked files auto-committed and pushed successfully")
+                    error_count = 0  # Reset error count on success
                     
-                except subprocess.CalledProcessError as e:
-                    print(f"\nError in git operations: {e.stderr}")
+                except subprocess.TimeoutExpired:
+                    error_count += 1
+                    if error_count >= 3:
+                        print("\nAuto-commit stopped due to timeouts.")
+                        return
                     continue
-                
+                    
+                except subprocess.CalledProcessError:
+                    error_count += 1
+                    if error_count >= 3:
+                        print("\nAuto-commit stopped due to errors.")
+                        return
+                    continue
+            
             # Wait for next check
             interval = config.get("commit_interval", 30)
-            print(f"\nWaiting {interval} minutes until next check...")
             time.sleep(interval * 60)
             
-        except Exception as e:
-            print(f"\nUnexpected error in auto-commit: {str(e)}")
+        except Exception:
+            error_count += 1
+            if error_count >= 3:
+                print("\nAuto-commit stopped due to repeated errors.")
+                return
             time.sleep(300)  # Wait 5 minutes before retry
 
 def verify_git_repo():
