@@ -41,67 +41,29 @@ def decrypt_data(encrypted_data):
 
 def load_config():
     """Loads and decrypts configuration from the JSON file."""
-    default_config = {
-        "repo_url": "",
-        "tracked_files": [],
-        "auto_commit": False,
-        "daemon_mode": False,
-        "commit_interval": 30,
-        "github_token": "",
-        "last_commit_time": None,
-        "remote_branch": "main"
-    }
-    
-    # If file doesn't exist, return defaults
     if not os.path.exists(CONFIG_FILE):
-        return default_config
-
-    max_retries = 3
-    retry_delay = 1  # seconds
-    
-    for attempt in range(max_retries):
-        try:
-            # Simple file read operation
-            with open(CONFIG_FILE, "r", encoding='utf-8') as file:
-                data = file.read().strip()
-                
-            # If file is empty, return defaults
-            if not data:
-                return default_config
-                
-            # Try to decrypt and parse the data
-            config = decrypt_data(data)
+        return {"repo_url": "", "tracked_files": [], "auto_commit": False, "daemon_mode": False}
+    try:
+        with open(CONFIG_FILE, "r") as file:
+            encrypted_data = file.read()
+            config = decrypt_data(encrypted_data)
             # Ensure all expected keys exist
-            for key in default_config:
-                if key not in config:
-                    config[key] = default_config[key]
+            if "daemon_mode" not in config:
+                config["daemon_mode"] = False
+            if "tracked_files" not in config:
+                config["tracked_files"] = []
             return config
-            
-        except (IOError, OSError) as e:
-            if attempt < max_retries - 1:
-                print(f"\nRetrying file read... (Attempt {attempt + 1}/{max_retries})")
-                time.sleep(retry_delay)
-                continue
-            print(f"\nError reading configuration file: {str(e)}")
-            return default_config
-        except Exception as e:
-            print(f"\nUnexpected error: {str(e)}")
-            return default_config
+    except (json.JSONDecodeError, ValueError):
+        print("\nError reading configuration file. Resetting to default.\n")
+        return {"repo_url": "", "tracked_files": [], "auto_commit": False, "daemon_mode": False}
 
 def save_config(config):
     """Encrypts and saves configuration securely."""
     try:
-        # Encrypt the configuration
-        encrypted_data = encrypt_data(config)
-        
-        # Simple direct write
-        with open(CONFIG_FILE, "w", encoding='utf-8') as file:
-            file.write(encrypted_data)
-            
-        return True
+        with open(CONFIG_FILE, "w") as file:
+            file.write(encrypt_data(config))
     except Exception as e:
-        print(f"\nError saving configuration: {str(e)}")
-        return False
+        print(f"\nError saving configuration: {e}\n")
 
 def reset_config():
     """Resets Git Manager configuration to defaults."""
@@ -251,112 +213,44 @@ def remove_from_tracking():
     subprocess.run("git push origin main", shell=True)
 
 def remove_git_config():
-    """Removes Git configuration and all related files."""
-    confirm = input("\nAre you sure you want to remove the Git configuration? (y/n): ")
+    """Removes Git configuration from the folder and the application settings."""
+    confirm = input("Are you sure you want to remove the Git configuration from this folder? (y/n): ")
     if confirm.lower() == "y":
-        try:
-            # Remove Git directory
-            if os.path.exists(".git"):
-                subprocess.run("rm -rf .git", shell=True)
-                print("- Git repository removed")
-
-            # Remove configuration files
-            files_to_remove = [
-                CONFIG_FILE,                  # tracked_files.json
-                ENCRYPTION_KEY_FILE,          # encryption.key
-                f"{CONFIG_FILE}.backup",      # tracked_files.json.backup
-            ]
-            
-            for file in files_to_remove:
-                if os.path.exists(file):
-                    os.remove(file)
-                    print(f"- Removed {file}")
-
-            print("\nGit configuration and related files have been removed.\n")
-            print("You can initialize a new repository using option 8 or")
-            print("create a new GitHub repository using option 10.\n")
-            
-        except Exception as e:
-            print(f"\nError removing files: {str(e)}\n")
+        subprocess.run("rm -rf .git", shell=True)
+        reset_config()
+        print("\nGit configuration has been removed from the folder \nand the application.\n")
+        print("You can initialize a new repository using option 8 or")
+        print("create a new GitHub repository using option 10.\n")
     else:
         print("\nRemoval cancelled.\n")
 
 def create_github_repo():
-    """Creates a new repository on GitHub and configures it locally."""
-    try:
-        print("\n=== GitHub Repository Setup ===")
-        
-        # Get GitHub token
-        config = load_config()
-        github_token = config.get("github_token")
-        if not github_token:
-            github_token = input("\nEnter your GitHub personal access token: ").strip()
-            if not github_token:
-                print("\nNo GitHub token provided. Cannot proceed with setup.\n")
-                return
-            config["github_token"] = github_token
-            save_config(config)
-
-        # Verify GitHub token
-        headers = {
-            "Authorization": f"token {github_token}",
-            "Accept": "application/vnd.github.v3+json"
-        }
-        username_response = requests.get("https://api.github.com/user", headers=headers)
-        if username_response.status_code != 200:
-            print("\nInvalid GitHub token. Please check your credentials.\n")
-            return
-        
+    """Allows the user to create a new repository on GitHub with a proper name."""
+    config = load_config()
+    github_token = config.get("github_token")
+    if not github_token:
+        github_token = input("\nEnter your GitHub personal access token: ")
+        config["github_token"] = github_token
+        save_config(config)
+    headers = {"Authorization": f"token {github_token}", "Accept": "application/vnd.github.v3+json"}
+    username_response = requests.get("https://api.github.com/user", headers=headers)
+    if username_response.status_code == 200:
         username = username_response.json().get("login")
-        print(f"\nAuthenticated as: {username}")
-
-        # Get repository details
-        print("\n=== Repository Details ===")
-        repo_name = input("Enter repository name: ").strip()
-        if not repo_name:
-            print("\nRepository name is required.\n")
-            return
-
-        description = input("Enter repository description (optional): ").strip()
-        private = input("Make repository private? (y/n): ").strip().lower() == 'y'
-
-        # Create GitHub repository
-        data = {
-            "name": repo_name,
-            "description": description,
-            "private": private
-        }
-        create_response = requests.post(GITHUB_API_URL, json=data, headers=headers)
-        
-        if create_response.status_code != 201:
-            print(f"\nError creating repository: {create_response.json().get('message')}")
-            return
-
-        # Repository created successfully
+    else:
+        print("\n\tFailed to retrieve GitHub username. Check your token.\n")
+        return
+    repo_name = input("\nEnter a name for your new GitHub repository: ")
+    description = input("\nEnter a description for the repository: ")
+    private = input("\nShould the repository be private? (y/n): ").strip().lower() == 'y'
+    data = {"name": repo_name, "description": description, "private": private}
+    response = requests.post(GITHUB_API_URL, json=data, headers=headers)
+    if response.status_code == 201:
         repo_url = f"https://github.com/{username}/{repo_name}.git"
-        print("\n=== Repository Created Successfully ===")
-        print(f"- URL: {repo_url}")
-        print(f"- Visibility: {'Private' if private else 'Public'}")
-        
-        # Ask to initialize locally
-        init_local = input("\nDo you want to initialize this repository locally? (y/n): ")
-        if init_local.lower() == "y":
-            if not os.path.exists(".git"):
-                subprocess.run("git init", shell=True, check=True)
-                subprocess.run("git branch -M main", shell=True, check=True)
-            
-            remote_url = f"https://{github_token}@github.com/{username}/{repo_name}.git"
-            subprocess.run(f"git remote add origin {remote_url}", shell=True, check=True)
-            
-            config["repo_url"] = repo_url  # Save the clean URL
-            save_config(config)
-            print("\nLocal repository initialized and configured.\n")
-        else:
-            print("\nRemote repository created. You can clone it later using:")
-            print(f"git clone {repo_url}\n")
-
-    except Exception as e:
-        print(f"\nError: {str(e)}\n")
+        print(f"Repository created successfully: {repo_url}")
+        config["repo_url"] = repo_url
+        save_config(config)
+    else:
+        print(f"\n\tFailed to create repository: {response.json()}\nCheck your GitHub token permissions.\n")
 
 def show_tracking_files():
     """Displays the list of tracked files."""
@@ -374,14 +268,24 @@ def show_repo_status():
 def auto_commit_process():
     """Handles automatic commits and pushes for tracked files only"""
     print("\nAuto-commit process started...")
-    error_count = 0  # Track consecutive errors
+    error_count = 0
+    
+    # Configure Git pull strategy
+    try:
+        subprocess.run(
+            "git config pull.rebase false",  # Use merge strategy
+            shell=True,
+            check=True
+        )
+    except Exception:
+        pass
     
     while True:
         try:
             config = load_config()
             if not config["auto_commit"]:
                 print("\nAuto-commit disabled.")
-                return  # Exit the thread when auto-commit is disabled
+                return
                 
             # Get list of tracked files
             tracked_files = config.get("tracked_files", [])
@@ -415,7 +319,42 @@ def auto_commit_process():
             
             if changes_detected:
                 try:
-                    # Stage changes first
+                    # First, fetch to check for remote changes
+                    subprocess.run(
+                        "git fetch origin",
+                        shell=True,
+                        check=True,
+                        timeout=30
+                    )
+                    
+                    # Check if we need to pull
+                    status = subprocess.run(
+                        "git status -uno",
+                        shell=True,
+                        capture_output=True,
+                        text=True
+                    )
+                    
+                    need_pull = "Your branch is behind" in status.stdout
+                    
+                    if need_pull:
+                        # Reset any local changes
+                        subprocess.run(
+                            "git reset --hard HEAD",
+                            shell=True,
+                            check=True,
+                            timeout=30
+                        )
+                        
+                        # Pull remote changes
+                        subprocess.run(
+                            "git pull origin main",
+                            shell=True,
+                            check=True,
+                            timeout=30
+                        )
+                    
+                    # Stage only tracked files
                     if tracked_files == "all":
                         subprocess.run("git add .", shell=True, check=True, timeout=30)
                     else:
@@ -428,39 +367,33 @@ def auto_commit_process():
                                     timeout=30
                                 )
                     
-                    # Commit changes
-                    subprocess.run(
-                        'git commit -m "Auto-commit: Changes in tracked files"',
+                    # Check if we have changes to commit
+                    status = subprocess.run(
+                        "git status --porcelain",
                         shell=True,
-                        check=True,
-                        timeout=30
+                        capture_output=True,
+                        text=True
                     )
                     
-                    # Try to push directly first
-                    try:
+                    if status.stdout.strip():
+                        # Commit changes
+                        subprocess.run(
+                            'git commit -m "Auto-commit: Changes in tracked files"',
+                            shell=True,
+                            check=True,
+                            timeout=30
+                        )
+                        
+                        # Push changes
                         subprocess.run(
                             "git push origin main",
                             shell=True,
                             check=True,
                             timeout=30
                         )
-                    except subprocess.CalledProcessError:
-                        # If push fails, try pull with allow-unrelated-histories
-                        subprocess.run(
-                            "git pull origin main --allow-unrelated-histories",
-                            shell=True,
-                            check=True,
-                            timeout=30
-                        )
-                        # Try push again
-                        subprocess.run(
-                            "git push origin main",
-                            shell=True,
-                            check=True,
-                            timeout=30
-                        )
+                        
+                        print("\nChanges committed and pushed successfully")
                     
-                    print("\nChanges committed and pushed successfully")
                     error_count = 0  # Reset error count on success
                     
                 except subprocess.TimeoutExpired:
@@ -737,11 +670,11 @@ def menu():
         print("\nGit Manager Menu:")
         print("1. Track Files")
         print("2. Show Tracked Files")
-        print("3. Remove Files from Tracking\n")
+        print("3. Remove Files from Tracking")
         print("4. Show Git Configuration")
-        print("5. Edit Git Configuration\n")
+        print("5. Edit Git Configuration")
         print("6. Edit Application Settings")
-        print("7. Reset Git Manager Configuration\n")
+        print("7. Reset Git Manager Configuration")
         print("8. Initialize Git Repository")
         print("9. Remove Git Configuration")
         print("10. Create GitHub Repository")
