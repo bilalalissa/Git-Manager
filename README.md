@@ -24,27 +24,38 @@ Git Manager is a secure and interactive CLI tool for managing Git repositories. 
   - Track by pattern (e.g., *.py)
   - Track all files
   - Remove files from tracking
+  - Verify tracking status
+  - Handle ignored files
 - **Auto-Commit & Daemon Mode:**
   - Automatic change detection
   - Configurable commit intervals
   - Background operation support
+  - Error recovery
+  - Retry mechanisms
 - **Conflict Resolution:**
   - Interactive conflict resolution
   - View file differences
   - Choose between local/remote versions
   - Manual editing support
+  - Automatic conflict detection
 - **Backup Management:**
-  - Create configuration backups
+  - Create configuration snapshots
   - List available backups
-  - Restore from backup
+  - Restore from backup points
+  - Maintain configuration history
+  - Secure backup storage
 - **Status Monitoring:**
   - Detailed repository health check
   - Local and remote status
   - Performance metrics
+  - Change detection
+  - Sync status
 - **Operation Logging:**
   - Comprehensive operation logs
   - Error tracking and reporting
   - Success/failure notifications
+  - Timestamp tracking
+  - Performance monitoring
 
 ## Installation
 
@@ -93,20 +104,23 @@ The menu provides the following options:
 
 ## Backup System
 
-The backup system allows you to:
-- Create snapshots of your configuration
-- View all available backups
-- Restore from any previous backup
-- Maintain configuration history
+The backup system provides:
+- Automatic backup creation before major changes
+- Timestamped configuration snapshots
+- Secure storage of encryption keys
+- Easy restoration of previous configurations
+- Backup verification
+- Multiple backup points
 
-## Conflict Resolution
+## Error Handling
 
-The interactive conflict resolution system helps you:
-- Identify conflicting files
-- View differences between versions
-- Choose between local and remote changes
-- Edit files manually when needed
-- Track resolution progress
+The system includes:
+- Automatic error recovery
+- Detailed error logging
+- User notifications for issues
+- Retry mechanisms for failed operations
+- Configuration validation
+- Data consistency checks
 
 ## Status Monitoring
 
@@ -115,6 +129,8 @@ Detailed status checks provide:
 - Remote synchronization status
 - Repository health metrics
 - Performance measurements
+- Conflict detection
+- File tracking verification
 
 ## Notes
 
@@ -123,6 +139,8 @@ Detailed status checks provide:
 - Use the menu to manage configurations securely
 - Check logs (Option 13) when errors occur
 - Create regular backups of your configuration
+- Verify file tracking status regularly
+- Monitor auto-commit logs for issues
 
 ## Contributions
 

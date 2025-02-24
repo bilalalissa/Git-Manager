@@ -510,42 +510,21 @@ def auto_commit_process():
     error_count = 0
     has_errors = False
     
-    try:
-        # Configure Git pull strategy silently
-        subprocess.run(
-            "git config pull.rebase false",
-            shell=True,
-            check=True,
-            capture_output=True
-        )
-    except Exception:
-        pass
-    
     while True:
         try:
             config = load_config()
             # Check both auto-commit and daemon mode
             if not (config.get("auto_commit") or config.get("daemon_mode")):
+                log_operation("Auto-commit", "INFO", "Auto-commit and daemon mode disabled")
                 return
                 
             # Get list of tracked files
             tracked_files = config.get("tracked_files", [])
-            if not tracked_files:
-                time.sleep(60)  # Wait a minute before next check
-                continue
             
-            # First, fetch any remote changes
-            try:
-                subprocess.run(
-                    "git fetch origin",
-                    shell=True,
-                    check=True,
-                    capture_output=True
-                )
-            except:
-                pass
-                
-            # Check for changes in tracked files
+            # Debug logging
+            log_operation("Auto-commit", "INFO", f"Tracked files: {tracked_files}")
+            
+            # Check for changes more frequently
             changes_detected = False
             if tracked_files == "all":
                 status = subprocess.run(
@@ -555,6 +534,8 @@ def auto_commit_process():
                     text=True
                 ).stdout.strip()
                 changes_detected = bool(status)
+                if changes_detected:
+                    log_operation("Auto-commit", "INFO", f"Changes detected: {status}")
             else:
                 for file in tracked_files:
                     if os.path.exists(file):
@@ -566,11 +547,12 @@ def auto_commit_process():
                         ).stdout.strip()
                         if status:
                             changes_detected = True
+                            log_operation("Auto-commit", "INFO", f"Changes detected in {file}")
                             break
             
             if changes_detected:
                 try:
-                    # Stage tracked files
+                    # Stage changes
                     if tracked_files == "all":
                         subprocess.run(
                             "git add .",
@@ -588,7 +570,7 @@ def auto_commit_process():
                                     capture_output=True
                                 )
                     
-                    # Check if we actually have changes to commit
+                    # Verify changes were staged
                     status = subprocess.run(
                         "git status --porcelain",
                         shell=True,
@@ -597,26 +579,14 @@ def auto_commit_process():
                     ).stdout.strip()
                     
                     if status:
-                        # Pull latest changes first
-                        try:
-                            subprocess.run(
-                                "git pull --no-rebase origin main",
-                                shell=True,
-                                check=True,
-                                capture_output=True
-                            )
-                        except:
-                            pass
-                        
-                        # Commit changes
+                        # Commit and push
                         subprocess.run(
-                            'git commit -m "Auto-commit: Changes in tracked files"',
+                            'git commit -m "Auto-commit: Updated tracked files"',
                             shell=True,
                             check=True,
                             capture_output=True
                         )
                         
-                        # Push changes
                         subprocess.run(
                             "git push origin main",
                             shell=True,
@@ -627,7 +597,7 @@ def auto_commit_process():
                         log_operation("Auto-commit", "SUCCESS", "Changes committed and pushed")
                         error_count = 0
                         has_errors = False
-                    
+                
                 except subprocess.CalledProcessError as e:
                     error_count += 1
                     log_operation("Auto-commit", "ERROR", f"Git error: {str(e)}")
@@ -636,9 +606,8 @@ def auto_commit_process():
                         print("\nAuto-commit stopped. Check logs (Option 13) for details.")
                         return
             
-            # Wait for next check
-            interval = config.get("commit_interval", 30)
-            time.sleep(interval * 60)
+            # Shorter interval for more responsive updates
+            time.sleep(30)  # Check every 30 seconds
             
         except Exception as e:
             error_count += 1
@@ -647,7 +616,7 @@ def auto_commit_process():
             if error_count >= 3:
                 print("\nAuto-commit stopped. Check logs (Option 13) for details.")
                 return
-            time.sleep(300)  # Wait 5 minutes before retry
+            time.sleep(60)  # Wait a minute before retry
 
 def verify_git_repo():
     """Verifies the Git repository is properly initialized and configured."""
