@@ -513,16 +513,25 @@ def auto_commit_process():
     while True:
         try:
             config = load_config()
-            # Check both auto-commit and daemon mode
             if not (config.get("auto_commit") or config.get("daemon_mode")):
                 log_operation("Auto-commit", "INFO", "Auto-commit and daemon mode disabled")
                 return
                 
-            # Get list of tracked files
             tracked_files = config.get("tracked_files", [])
-            
-            # Debug logging
             log_operation("Auto-commit", "INFO", f"Tracked files: {tracked_files}")
+            
+            # Check Git configuration
+            git_config = subprocess.run(
+                "git config --list",
+                shell=True,
+                capture_output=True,
+                text=True
+            ).stdout
+            
+            if "user.name" not in git_config or "user.email" not in git_config:
+                log_operation("Auto-commit", "ERROR", "Git user not configured")
+                print("\nGit user configuration missing. Please configure in menu option 5.")
+                return
             
             # Check for changes more frequently
             changes_detected = False
@@ -655,85 +664,106 @@ def verify_git_repo():
 def sync_with_remote():
     """Synchronizes local repository with remote."""
     try:
-        # Fetch latest changes
-        subprocess.run(
-            "git fetch origin",
-            shell=True,
-            check=True,
-            capture_output=True
-        )
-        
-        # Check if we need to pull
+        # First check if we have any changes to commit
         status = subprocess.run(
-            "git status -uno",
+            "git status --porcelain",
             shell=True,
             capture_output=True,
             text=True
-        ).stdout
+        ).stdout.strip()
         
-        if "Your branch is behind" in status:
-            # Pull changes
-            subprocess.run(
-                "git pull --no-rebase origin main",
+        if status:
+            # Get detailed status
+            detailed_status = subprocess.run(
+                "git status",
                 shell=True,
-                check=True,
-                capture_output=True
-            )
-            print("\nPulled latest changes from remote")
+                capture_output=True,
+                text=True
+            ).stdout
+            print("\nCurrent Status:")
+            print(detailed_status)
             
-        # Stage and commit any local changes
-        config = load_config()
-        tracked_files = config.get("tracked_files", [])
-        
-        if tracked_files:
-            if tracked_files == "all":
-                subprocess.run(
-                    "git add .",
-                    shell=True,
-                    check=True,
-                    capture_output=True
-                )
-            else:
-                for file in tracked_files:
-                    if os.path.exists(file):
+            # Stage changes
+            config = load_config()
+            tracked_files = config.get("tracked_files", [])
+            
+            if tracked_files:
+                try:
+                    if tracked_files == "all":
                         subprocess.run(
-                            f"git add {file}",
+                            "git add .",
                             shell=True,
                             check=True,
                             capture_output=True
                         )
+                    else:
+                        for file in tracked_files:
+                            if os.path.exists(file):
+                                subprocess.run(
+                                    f"git add {file}",
+                                    shell=True,
+                                    check=True,
+                                    capture_output=True
+                                )
+                    
+                    # Try to commit with more detailed error handling
+                    try:
+                        commit_result = subprocess.run(
+                            'git commit -m "Sync: Updated tracked files"',
+                            shell=True,
+                            capture_output=True,
+                            text=True
+                        )
+                        if commit_result.returncode != 0:
+                            print("\nCommit failed. Error message:")
+                            print(commit_result.stderr)
+                            if "nothing to commit" in commit_result.stderr:
+                                print("\nNo changes to commit")
+                            elif "please tell me who you are" in commit_result.stderr:
+                                print("\nGit user not configured. Please set user.name and user.email:")
+                                name = input("Enter your name: ")
+                                email = input("Enter your email: ")
+                                subprocess.run(f'git config --global user.name "{name}"', shell=True)
+                                subprocess.run(f'git config --global user.email "{email}"', shell=True)
+                                # Try commit again
+                                subprocess.run(
+                                    'git commit -m "Sync: Updated tracked files"',
+                                    shell=True,
+                                    check=True
+                                )
+                            return
+                        
+                        # Push changes
+                        push_result = subprocess.run(
+                            "git push origin main",
+                            shell=True,
+                            capture_output=True,
+                            text=True
+                        )
+                        if push_result.returncode != 0:
+                            print("\nPush failed. Error message:")
+                            print(push_result.stderr)
+                            return
+                            
+                        print("\nChanges committed and pushed successfully")
+                        
+                    except subprocess.CalledProcessError as e:
+                        print(f"\nError during commit/push: {str(e)}")
+                        return
+                        
+                except subprocess.CalledProcessError as e:
+                    print(f"\nError staging files: {str(e)}")
+                    return
             
-            # Check if we have changes to commit
-            status = subprocess.run(
-                "git status --porcelain",
-                shell=True,
-                capture_output=True,
-                text=True
-            ).stdout.strip()
+        else:
+            print("\nNo changes to sync")
             
-            if status:
-                subprocess.run(
-                    'git commit -m "Sync: Updated tracked files"',
-                    shell=True,
-                    check=True,
-                    capture_output=True
-                )
-                print("\nCommitted local changes")
-                
-                # Push changes
-                subprocess.run(
-                    "git push origin main",
-                    shell=True,
-                    check=True,
-                    capture_output=True
-                )
-                print("Pushed changes to remote")
-                
-        print("\nSync completed successfully")
+        print("\nSync completed")
         log_operation("Sync", "SUCCESS", "Repository synchronized with remote")
         
     except subprocess.CalledProcessError as e:
         print(f"\nError syncing with remote: {str(e)}")
+        print("Error details:", e.stderr if hasattr(e, 'stderr') else "No additional details")
         log_operation("Sync", "ERROR", f"Sync failed: {str(e)}")
 
 def verify_config_files():
