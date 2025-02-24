@@ -268,27 +268,74 @@ def edit_git_config():
 def remove_from_tracking():
     """Allows user to remove files from Git tracking."""
     config = load_config()
+    removed_files = []  # Track which files were removed
+    
     while True:
         file_name = input("\nEnter file to remove from tracking (or type 'done' to finish): ")
         if file_name.lower() == "done":
             break
             
         if file_name in config["tracked_files"]:
-            config["tracked_files"].remove(file_name)
-            subprocess.run(f"git rm --cached {file_name}", shell=True)
-            print(f" - Removed {file_name} from tracking.")
-            log_operation("Tracking", "SUCCESS", f"Removed {file_name} from tracking")
+            try:
+                # Remove from Git tracking but keep the file locally
+                subprocess.run(
+                    f"git rm --cached {file_name}",
+                    shell=True,
+                    check=True,
+                    capture_output=True
+                )
+                
+                # Remove from our tracking list
+                config["tracked_files"].remove(file_name)
+                removed_files.append(file_name)
+                
+                print(f" - Removed {file_name} from tracking.")
+                log_operation("Tracking", "SUCCESS", f"Removed {file_name} from tracking")
+                
+            except subprocess.CalledProcessError as e:
+                print(f" - Error removing {file_name}: {str(e)}")
+                log_operation("Tracking", "ERROR", f"Failed to remove {file_name}: {str(e)}")
         else:
             print(f" - {file_name} is not in tracking list.")
-            
-    # Save the updated configuration
-    if save_config(config):
-        subprocess.run('git commit -m "Removed files from tracking"', shell=True)
-        subprocess.run("git push origin main", shell=True)
-        print("\nChanges saved and committed successfully")
-    else:
-        print("\nFailed to save tracking changes")
-        log_operation("Tracking", "ERROR", "Failed to save tracking changes")
+    
+    if removed_files:
+        try:
+            # Save configuration first
+            if save_config(config):
+                # Add .gitignore if it exists to ensure it's updated
+                if os.path.exists(".gitignore"):
+                    subprocess.run(
+                        "git add .gitignore",
+                        shell=True,
+                        check=True,
+                        capture_output=True
+                    )
+                
+                # Commit the changes with list of removed files
+                files_list = ", ".join(removed_files)
+                subprocess.run(
+                    f'git commit -m "Removed from tracking: {files_list}"',
+                    shell=True,
+                    check=True,
+                    capture_output=True
+                )
+                
+                # Push changes to remote
+                subprocess.run(
+                    "git push origin main",
+                    shell=True,
+                    check=True,
+                    capture_output=True
+                )
+                
+                print("\nChanges saved and pushed to remote successfully")
+                log_operation("Tracking", "SUCCESS", f"Pushed removal of {len(removed_files)} files")
+            else:
+                print("\nFailed to save tracking changes")
+                log_operation("Tracking", "ERROR", "Failed to save tracking configuration")
+        except subprocess.CalledProcessError as e:
+            print(f"\nError syncing changes with remote: {str(e)}")
+            log_operation("Tracking", "ERROR", f"Failed to sync changes: {str(e)}")
 
 def remove_git_config():
     """Removes Git configuration from the folder and the application settings."""
