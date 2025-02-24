@@ -491,8 +491,8 @@ def auto_commit_process():
     error_count = 0
     has_errors = False
     
-    # Configure Git pull strategy silently
     try:
+        # Configure Git pull strategy silently
         subprocess.run(
             "git config pull.rebase false",
             shell=True,
@@ -512,51 +512,51 @@ def auto_commit_process():
             # Get list of tracked files
             tracked_files = config.get("tracked_files", [])
             if not tracked_files:
-                time.sleep(config.get("commit_interval", 30) * 60)
+                time.sleep(60)  # Wait a minute before next check
                 continue
-                
-            # Check for changes in tracked files only
-            changes_detected = False
             
+            # First, fetch any remote changes
+            try:
+                subprocess.run(
+                    "git fetch origin",
+                    shell=True,
+                    check=True,
+                    capture_output=True
+                )
+            except:
+                pass
+                
+            # Check for changes in tracked files
+            changes_detected = False
             if tracked_files == "all":
                 status = subprocess.run(
                     "git status --porcelain",
                     shell=True,
                     capture_output=True,
                     text=True
-                )
-                changes_detected = bool(status.stdout.strip())
+                ).stdout.strip()
+                changes_detected = bool(status)
             else:
                 for file in tracked_files:
                     if os.path.exists(file):
-                        file_status = subprocess.run(
+                        status = subprocess.run(
                             f"git status --porcelain {file}",
                             shell=True,
                             capture_output=True,
                             text=True
-                        )
-                        if file_status.stdout.strip():
+                        ).stdout.strip()
+                        if status:
                             changes_detected = True
                             break
             
             if changes_detected:
                 try:
-                    # First, fetch to check for remote changes
-                    subprocess.run(
-                        "git fetch origin",
-                        shell=True,
-                        check=True,
-                        timeout=30,
-                        capture_output=True
-                    )
-                    
-                    # Stage only tracked files
+                    # Stage tracked files
                     if tracked_files == "all":
                         subprocess.run(
                             "git add .",
                             shell=True,
                             check=True,
-                            timeout=30,
                             capture_output=True
                         )
                     else:
@@ -566,90 +566,69 @@ def auto_commit_process():
                                     f"git add {file}",
                                     shell=True,
                                     check=True,
-                                    timeout=30,
                                     capture_output=True
                                 )
                     
-                    # Check if we have changes to commit
+                    # Check if we actually have changes to commit
                     status = subprocess.run(
                         "git status --porcelain",
                         shell=True,
                         capture_output=True,
                         text=True
-                    )
+                    ).stdout.strip()
                     
-                    if status.stdout.strip():
-                        # Commit changes
-                        subprocess.run(
-                            'git commit -m "Auto-commit: Changes in tracked files"',
-                            shell=True,
-                            check=True,
-                            timeout=30,
-                            capture_output=True
-                        )
-                        
-                        # Try to pull first to avoid conflicts
+                    if status:
+                        # Pull latest changes first
                         try:
                             subprocess.run(
                                 "git pull --no-rebase origin main",
                                 shell=True,
                                 check=True,
-                                timeout=30,
                                 capture_output=True
                             )
                         except:
                             pass
+                        
+                        # Commit changes
+                        subprocess.run(
+                            'git commit -m "Auto-commit: Changes in tracked files"',
+                            shell=True,
+                            check=True,
+                            capture_output=True
+                        )
                         
                         # Push changes
                         subprocess.run(
                             "git push origin main",
                             shell=True,
                             check=True,
-                            timeout=30,
                             capture_output=True
                         )
                         
                         log_operation("Auto-commit", "SUCCESS", "Changes committed and pushed")
                         error_count = 0
-                    
-                except subprocess.TimeoutExpired:
-                    error_count += 1
-                    log_operation("Auto-commit", "ERROR", f"Timeout error (attempt {error_count}/3)")
-                    has_errors = True
-                    if error_count >= 3:
-                        log_operation("Auto-commit", "ERROR", "Process stopped due to timeouts")
-                        print("\nAuto-commit stopped. Check logs (Option 13) for details.")
-                        return
-                    continue
+                        has_errors = False
                     
                 except subprocess.CalledProcessError as e:
                     error_count += 1
                     log_operation("Auto-commit", "ERROR", f"Git error: {str(e)}")
                     has_errors = True
                     if error_count >= 3:
-                        log_operation("Auto-commit", "ERROR", "Process stopped due to repeated errors")
                         print("\nAuto-commit stopped. Check logs (Option 13) for details.")
                         return
-                    continue
             
-            # If there were errors, notify user to check logs
-            if has_errors:
-                print("\nSome operations had errors. Use Option 13 to view details.")
-                has_errors = False
-                
-            # Wait interval
+            # Wait for next check
             interval = config.get("commit_interval", 30)
             time.sleep(interval * 60)
             
         except Exception as e:
-            log_operation("Auto-commit", "ERROR", f"Unexpected error: {str(e)}")
             error_count += 1
+            log_operation("Auto-commit", "ERROR", f"Unexpected error: {str(e)}")
             has_errors = True
             if error_count >= 3:
-                log_operation("Auto-commit", "ERROR", "Process stopped due to repeated errors")
                 print("\nAuto-commit stopped. Check logs (Option 13) for details.")
                 return
-            time.sleep(300)
+            time.sleep(300)  # Wait 5 minutes before retry
 
 def verify_git_repo():
     """Verifies the Git repository is properly initialized and configured."""
@@ -686,102 +665,88 @@ def verify_git_repo():
         return False, f"Error verifying repository: {str(e)}"
 
 def sync_with_remote():
-    """Syncs local repository with remote and handles merges."""
+    """Synchronizes local repository with remote."""
     try:
-        print("\n=== Syncing with Remote Repository ===")
-        
-        # Check if repository exists and has a remote
-        if not os.path.exists(".git"):
-            print("No Git repository found in current directory.")
-            return
-            
-        remote_check = subprocess.run("git remote -v", shell=True, capture_output=True, text=True)
-        if not remote_check.stdout:
-            print("No remote repository configured.")
-            return
-
         # Fetch latest changes
-        print("\nFetching remote changes...")
-        fetch_result = subprocess.run("git fetch origin", shell=True, capture_output=True, text=True)
-        if fetch_result.returncode != 0:
-            print(f"Error fetching changes: {fetch_result.stderr}")
-            return
-
-        # Check if we're behind remote
+        subprocess.run(
+            "git fetch origin",
+            shell=True,
+            check=True,
+            capture_output=True
+        )
+        
+        # Check if we need to pull
         status = subprocess.run(
             "git status -uno",
             shell=True,
             capture_output=True,
             text=True
-        )
+        ).stdout
         
-        if "Your branch is behind" in status.stdout:
-            print("\nLocal repository is behind remote. Changes detected.")
+        if "Your branch is behind" in status:
+            # Pull changes
+            subprocess.run(
+                "git pull --no-rebase origin main",
+                shell=True,
+                check=True,
+                capture_output=True
+            )
+            print("\nPulled latest changes from remote")
             
-            # Check for local changes
-            local_changes = subprocess.run(
+        # Stage and commit any local changes
+        config = load_config()
+        tracked_files = config.get("tracked_files", [])
+        
+        if tracked_files:
+            if tracked_files == "all":
+                subprocess.run(
+                    "git add .",
+                    shell=True,
+                    check=True,
+                    capture_output=True
+                )
+            else:
+                for file in tracked_files:
+                    if os.path.exists(file):
+                        subprocess.run(
+                            f"git add {file}",
+                            shell=True,
+                            check=True,
+                            capture_output=True
+                        )
+            
+            # Check if we have changes to commit
+            status = subprocess.run(
                 "git status --porcelain",
                 shell=True,
                 capture_output=True,
                 text=True
-            )
+            ).stdout.strip()
             
-            if local_changes.stdout:
-                print("\nLocal changes detected. Choose how to proceed:")
-                print("1. Stash local changes and pull")
-                print("2. Merge remote changes (might cause conflicts)")
-                print("3. Cancel sync")
+            if status:
+                subprocess.run(
+                    'git commit -m "Sync: Updated tracked files"',
+                    shell=True,
+                    check=True,
+                    capture_output=True
+                )
+                print("\nCommitted local changes")
                 
-                choice = input("\nEnter your choice (1-3): ")
+                # Push changes
+                subprocess.run(
+                    "git push origin main",
+                    shell=True,
+                    check=True,
+                    capture_output=True
+                )
+                print("Pushed changes to remote")
                 
-                if choice == "1":
-                    # Stash local changes
-                    subprocess.run("git stash", shell=True, check=True)
-                    print("\nLocal changes stashed.")
-                    
-                    # Pull changes
-                    pull_result = subprocess.run("git pull origin main", shell=True, capture_output=True, text=True)
-                    if pull_result.returncode == 0:
-                        print("\nSuccessfully pulled remote changes.")
-                        
-                        # Try to apply stash
-                        stash_result = subprocess.run("git stash pop", shell=True, capture_output=True, text=True)
-                        if stash_result.returncode == 0:
-                            print("Local changes reapplied successfully.")
-                        else:
-                            print("\nConflicts occurred while reapplying local changes.")
-                            print("Your changes are saved in the stash. Use 'git stash list' to see them.")
-                            print("Resolve conflicts manually when ready using 'git stash pop'")
-                    else:
-                        print(f"\nError pulling changes: {pull_result.stderr}")
-                        
-                elif choice == "2":
-                    # Try to merge directly
-                    merge_result = subprocess.run("git pull origin main", shell=True, capture_output=True, text=True)
-                    if merge_result.returncode == 0:
-                        print("\nMerge successful!")
-                    else:
-                        print("\nMerge conflicts occurred. Please resolve them manually:")
-                        print("1. Fix conflicts in the affected files")
-                        print("2. Use 'git add' to mark them as resolved")
-                        print("3. Use 'git commit' to finish the merge")
-                        
-                elif choice == "3":
-                    print("\nSync cancelled.")
-                    return
-                    
-            else:
-                # No local changes, safe to pull
-                pull_result = subprocess.run("git pull origin main", shell=True, capture_output=True, text=True)
-                if pull_result.returncode == 0:
-                    print("\nSuccessfully pulled remote changes.")
-                else:
-                    print(f"\nError pulling changes: {pull_result.stderr}")
-        else:
-            print("\nLocal repository is up to date with remote.")
-
-    except Exception as e:
-        print(f"\nError during sync: {str(e)}")
+        print("\nSync completed successfully")
+        log_operation("Sync", "SUCCESS", "Repository synchronized with remote")
+        
+    except subprocess.CalledProcessError as e:
+        print(f"\nError syncing with remote: {str(e)}")
+        log_operation("Sync", "ERROR", f"Sync failed: {str(e)}")
 
 def verify_config_files():
     """Verifies configuration files exist and are accessible."""
