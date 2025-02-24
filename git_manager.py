@@ -195,6 +195,12 @@ def edit_config():
             except ValueError:
                 print("\nInvalid interval. Keeping current setting.")
                 log_operation("Configuration", "ERROR", "Invalid commit interval format")
+
+        elif choice == "q":
+            # Return to main menu
+            print("\n")
+            return
+        
         else:
             print("\nInvalid choice.")
             return
