@@ -271,14 +271,15 @@ def auto_commit_process():
     """Handles automatic commits and pushes for tracked files only"""
     log_operation("Auto-commit", "INFO", "Process started")
     error_count = 0
+    has_errors = False  # Track if there are errors to check
     
-    # Configure Git pull strategy
+    # Configure Git pull strategy silently
     try:
         subprocess.run(
-            "git config pull.rebase false",  # Use merge strategy
+            "git config pull.rebase false",
             shell=True,
             check=True,
-            capture_output=True  # Capture output to hide it
+            capture_output=True
         )
     except Exception:
         pass
@@ -287,7 +288,6 @@ def auto_commit_process():
         try:
             config = load_config()
             if not config["auto_commit"]:
-                print("\nAuto-commit disabled.")
                 return
                 
             # Get list of tracked files
@@ -407,38 +407,48 @@ def auto_commit_process():
                             capture_output=True
                         )
                         
-                        print("\nChanges committed and pushed successfully")
+                        # Only log success, don't print
                         log_operation("Auto-commit", "SUCCESS", "Changes committed and pushed")
-                    
-                    error_count = 0  # Reset error count on success
+                        error_count = 0
                     
                 except subprocess.TimeoutExpired:
                     error_count += 1
                     log_operation("Auto-commit", "ERROR", f"Timeout error (attempt {error_count}/3)")
+                    has_errors = True
                     if error_count >= 3:
                         log_operation("Auto-commit", "ERROR", "Process stopped due to timeouts")
+                        print("\nAuto-commit stopped. Check logs (Option 13) for details.")
                         return
                     continue
                     
                 except subprocess.CalledProcessError as e:
                     error_count += 1
                     log_operation("Auto-commit", "ERROR", f"Git error: {str(e)}")
+                    has_errors = True
                     if error_count >= 3:
                         log_operation("Auto-commit", "ERROR", "Process stopped due to repeated errors")
+                        print("\nAuto-commit stopped. Check logs (Option 13) for details.")
                         return
                     continue
             
-            # Wait for next check
+            # If there were errors, notify user to check logs
+            if has_errors:
+                print("\nSome operations had errors. Use Option 13 to view details.")
+                has_errors = False  # Reset flag
+                
+            # Wait silently
             interval = config.get("commit_interval", 30)
             time.sleep(interval * 60)
             
         except Exception as e:
             log_operation("Auto-commit", "ERROR", f"Unexpected error: {str(e)}")
             error_count += 1
+            has_errors = True
             if error_count >= 3:
                 log_operation("Auto-commit", "ERROR", "Process stopped due to repeated errors")
+                print("\nAuto-commit stopped. Check logs (Option 13) for details.")
                 return
-            time.sleep(300)  # Wait 5 minutes before retry
+            time.sleep(300)
 
 def verify_git_repo():
     """Verifies the Git repository is properly initialized and configured."""
@@ -773,17 +783,22 @@ def show_recent_logs():
         return
         
     print("\nRecent Operations:")
+    has_errors = False
     with open("git_manager.log", "r") as f:
         # Get last 10 lines
         lines = f.readlines()[-10:]
         for line in lines:
-            # Format the log entry for display
             parts = line.split(" - ", 2)
             if len(parts) >= 3:
                 timestamp = parts[0]
                 level = parts[1]
                 message = parts[2].strip()
+                if "ERROR" in level:
+                    has_errors = True
                 print(f"{timestamp} | {level} | {message}")
+    
+    if has_errors:
+        print("\nNote: There are errors in the log that may need attention.")
     print()
 
 if __name__ == "__main__":
