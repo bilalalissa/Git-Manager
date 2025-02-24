@@ -289,7 +289,7 @@ def auto_commit_process():
     """Handles automatic commits and pushes for tracked files only"""
     log_operation("Auto-commit", "INFO", "Process started")
     error_count = 0
-    has_errors = False  # Track if there are errors to check
+    has_errors = False
     
     # Configure Git pull strategy silently
     try:
@@ -305,7 +305,8 @@ def auto_commit_process():
     while True:
         try:
             config = load_config()
-            if not config["auto_commit"]:
+            # Check both auto-commit and daemon mode
+            if not (config.get("auto_commit") or config.get("daemon_mode")):
                 return
                 
             # Get list of tracked files
@@ -340,7 +341,7 @@ def auto_commit_process():
             
             if changes_detected:
                 try:
-                    # First, fetch to check for remote changes (silently)
+                    # First, fetch to check for remote changes
                     subprocess.run(
                         "git fetch origin",
                         shell=True,
@@ -349,36 +350,7 @@ def auto_commit_process():
                         capture_output=True
                     )
                     
-                    # Check if we need to pull (silently)
-                    status = subprocess.run(
-                        "git status -uno",
-                        shell=True,
-                        capture_output=True,
-                        text=True
-                    )
-                    
-                    need_pull = "Your branch is behind" in status.stdout
-                    
-                    if need_pull:
-                        # Reset any local changes (silently)
-                        subprocess.run(
-                            "git reset --hard HEAD",
-                            shell=True,
-                            check=True,
-                            timeout=30,
-                            capture_output=True
-                        )
-                        
-                        # Pull remote changes (silently)
-                        subprocess.run(
-                            "git pull origin main",
-                            shell=True,
-                            check=True,
-                            timeout=30,
-                            capture_output=True
-                        )
-                    
-                    # Stage only tracked files (silently)
+                    # Stage only tracked files
                     if tracked_files == "all":
                         subprocess.run(
                             "git add .",
@@ -398,7 +370,7 @@ def auto_commit_process():
                                     capture_output=True
                                 )
                     
-                    # Check if we have changes to commit (silently)
+                    # Check if we have changes to commit
                     status = subprocess.run(
                         "git status --porcelain",
                         shell=True,
@@ -407,7 +379,7 @@ def auto_commit_process():
                     )
                     
                     if status.stdout.strip():
-                        # Commit changes (silently)
+                        # Commit changes
                         subprocess.run(
                             'git commit -m "Auto-commit: Changes in tracked files"',
                             shell=True,
@@ -416,7 +388,19 @@ def auto_commit_process():
                             capture_output=True
                         )
                         
-                        # Push changes (silently)
+                        # Try to pull first to avoid conflicts
+                        try:
+                            subprocess.run(
+                                "git pull --no-rebase origin main",
+                                shell=True,
+                                check=True,
+                                timeout=30,
+                                capture_output=True
+                            )
+                        except:
+                            pass
+                        
+                        # Push changes
                         subprocess.run(
                             "git push origin main",
                             shell=True,
@@ -425,7 +409,6 @@ def auto_commit_process():
                             capture_output=True
                         )
                         
-                        # Only log success, don't print
                         log_operation("Auto-commit", "SUCCESS", "Changes committed and pushed")
                         error_count = 0
                     
@@ -452,9 +435,9 @@ def auto_commit_process():
             # If there were errors, notify user to check logs
             if has_errors:
                 print("\nSome operations had errors. Use Option 13 to view details.")
-                has_errors = False  # Reset flag
+                has_errors = False
                 
-            # Wait silently
+            # Wait interval
             interval = config.get("commit_interval", 30)
             time.sleep(interval * 60)
             
@@ -691,9 +674,17 @@ def initialize_git():
 
 def menu():
     """Displays the interactive menu."""
-    setup_logging()  # Initialize logging
+    setup_logging()
     generate_key()
     verify_config_files()
+    
+    # Start auto-commit thread if either auto-commit or daemon mode is enabled
+    config = load_config()
+    if config.get("auto_commit") or config.get("daemon_mode"):
+        import threading
+        auto_commit_thread = threading.Thread(target=auto_commit_process, daemon=True)
+        auto_commit_thread.start()
+    
     show_welcome = True
     os.system('cls' if os.name == 'nt' else 'clear')
     
@@ -702,13 +693,6 @@ def menu():
     if not repo_valid:
         print(f"\nWarning: {repo_message}")
         print("Use option 8 to initialize repository if needed.\n")
-    
-    # Start auto-commit in a separate thread if enabled
-    config = load_config()
-    if config["auto_commit"]:
-        import threading
-        auto_commit_thread = threading.Thread(target=auto_commit_process, daemon=True)
-        auto_commit_thread.start()
     
     if show_welcome:
         print("\n\t==  Welcome to Git Manager  ==\n")
