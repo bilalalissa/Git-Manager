@@ -756,7 +756,7 @@ def sync_with_remote():
             print("\nUntracked files (not included in sync):")
             for file in untracked.split('\n'):
                 print(f"  {file}")
-            print("\nUse 'Add Tracked Files' option - to start tracking these files if needed.")
+            print("\nUse 'Add Tracked Files' option-1 to start tracking these files if needed.")
         
     except subprocess.CalledProcessError as e:
         print(f"\nError during sync: {str(e)}")
