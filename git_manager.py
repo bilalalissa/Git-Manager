@@ -11,6 +11,7 @@ import logging
 from datetime import datetime
 from backup_manager import BackupManager
 import glob
+import fnmatch
 
 CONFIG_FILE = "tracked_files.json"
 ENCRYPTION_KEY_FILE = "encryption.key"
@@ -77,6 +78,18 @@ def reset_config():
         os.remove(CONFIG_FILE)
     print("\n\t== >Git Manager configuration has been reset.\n")
 
+def check_gitignore(file_name):
+    """Checks if a file is in .gitignore."""
+    if os.path.exists(".gitignore"):
+        with open(".gitignore", "r") as f:
+            ignored = f.read().splitlines()
+            # Check direct matches and patterns
+            for pattern in ignored:
+                if pattern and not pattern.startswith("#"):
+                    if file_name == pattern or fnmatch.fnmatch(file_name, pattern):
+                        return True
+    return False
+
 def track_files():
     """Enhanced file tracking with pattern support and status feedback."""
     config = load_config()
@@ -95,10 +108,21 @@ def track_files():
         if choice == "1":
             file_name = input("Enter file name: ")
             if os.path.exists(file_name):
+                if check_gitignore(file_name):
+                    print(f"\nWarning: {file_name} is in .gitignore")
+                    confirm = input("Do you still want to track this file? (y/n): ")
+                    if confirm.lower() != 'y':
+                        continue
                 if isinstance(config["tracked_files"], list):
-                    config["tracked_files"].append(file_name)
-                    print(f"Added {file_name} to tracking")
-                    log_operation("Tracking", "SUCCESS", f"Added {file_name}")
+                    if file_name not in config["tracked_files"]:
+                        config["tracked_files"].append(file_name)
+                        print(f"Added {file_name} to tracking")
+                        log_operation("Tracking", "SUCCESS", f"Added {file_name}")
+                        save_config(config)
+                    else:
+                        print(f"{file_name} is already being tracked")
+                else:
+                    print("All files are currently being tracked")
             else:
                 print("File not found")
                 log_operation("Tracking", "ERROR", f"File not found: {file_name}")
@@ -743,7 +767,7 @@ def menu():
         if choice == "1":
             track_files()
         elif choice == "2":
-            show_tracking_files()
+            show_tracked_files()
         elif choice == "3":
             remove_from_tracking()
         elif choice == "4":
@@ -1034,6 +1058,41 @@ def backup_menu():
                 
         elif choice == "4":
             break
+
+def verify_tracked_file(file_name):
+    """Verifies that a file is actually being tracked."""
+    config = load_config()
+    if config["tracked_files"] == "all":
+        return True
+    return file_name in config["tracked_files"]
+
+def show_tracked_files():
+    """Displays all files currently being tracked."""
+    config = load_config()
+    print("\nCurrently tracked files:")
+    if config["tracked_files"] == "all":
+        print("All files in repository")
+        # Show actual tracked files from git
+        result = subprocess.run(
+            "git ls-files",
+            shell=True,
+            capture_output=True,
+            text=True
+        )
+        if result.stdout:
+            for file in result.stdout.splitlines():
+                print(f"- {file}")
+    else:
+        if not config["tracked_files"]:
+            print("No files are currently being tracked")
+        else:
+            for file in config["tracked_files"]:
+                if os.path.exists(file):
+                    status = "✓" if verify_tracked_file(file) else "!"
+                    print(f"- {file} {status}")
+                else:
+                    print(f"- {file} (missing)")
+    print()
 
 if __name__ == "__main__":
     menu()
