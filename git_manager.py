@@ -7,6 +7,8 @@ import sys
 from cryptography.fernet import Fernet
 import platform
 import requests
+import logging
+from datetime import datetime
 
 CONFIG_FILE = "tracked_files.json"
 ENCRYPTION_KEY_FILE = "encryption.key"
@@ -267,7 +269,7 @@ def show_repo_status():
 
 def auto_commit_process():
     """Handles automatic commits and pushes for tracked files only"""
-    print("\nAuto-commit process started...")
+    log_operation("Auto-commit", "INFO", "Process started")
     error_count = 0
     
     # Configure Git pull strategy
@@ -393,20 +395,23 @@ def auto_commit_process():
                         )
                         
                         print("\nChanges committed and pushed successfully")
+                        log_operation("Auto-commit", "SUCCESS", "Changes committed and pushed")
                     
                     error_count = 0  # Reset error count on success
                     
                 except subprocess.TimeoutExpired:
                     error_count += 1
+                    log_operation("Auto-commit", "ERROR", f"Timeout error (attempt {error_count}/3)")
                     if error_count >= 3:
-                        print("\nAuto-commit stopped due to timeouts.")
+                        log_operation("Auto-commit", "ERROR", "Process stopped due to timeouts")
                         return
                     continue
                     
-                except subprocess.CalledProcessError:
+                except subprocess.CalledProcessError as e:
                     error_count += 1
+                    log_operation("Auto-commit", "ERROR", f"Git error: {str(e)}")
                     if error_count >= 3:
-                        print("\nAuto-commit stopped due to errors.")
+                        log_operation("Auto-commit", "ERROR", "Process stopped due to repeated errors")
                         return
                     continue
             
@@ -414,10 +419,11 @@ def auto_commit_process():
             interval = config.get("commit_interval", 30)
             time.sleep(interval * 60)
             
-        except Exception:
+        except Exception as e:
+            log_operation("Auto-commit", "ERROR", f"Unexpected error: {str(e)}")
             error_count += 1
             if error_count >= 3:
-                print("\nAuto-commit stopped due to repeated errors.")
+                log_operation("Auto-commit", "ERROR", "Process stopped due to repeated errors")
                 return
             time.sleep(300)  # Wait 5 minutes before retry
 
@@ -644,6 +650,7 @@ def initialize_git():
 
 def menu():
     """Displays the interactive menu."""
+    setup_logging()  # Initialize logging
     generate_key()
     verify_config_files()
     show_welcome = True
@@ -670,17 +677,18 @@ def menu():
         print("\nGit Manager Menu:")
         print("1. Track Files")
         print("2. Show Tracked Files")
-        print("3. Remove Files from Tracking")
+        print("3. Remove Files from Tracking\n")
         print("4. Show Git Configuration")
-        print("5. Edit Git Configuration")
+        print("5. Edit Git Configuration\n")
         print("6. Edit Application Settings")
-        print("7. Reset Git Manager Configuration")
+        print("7. Reset Git Manager Configuration\n")
         print("8. Initialize Git Repository")
         print("9. Remove Git Configuration")
         print("10. Create GitHub Repository")
         print("11. Show Repository Status")
         print("12. Sync with Remote")
-        print("13. Exit")
+        print("13. Show Recent Logs")
+        print("14. Exit")
         
         choice = input("\nEnter your choice: ")
         
@@ -709,10 +717,61 @@ def menu():
         elif choice == "12":
             sync_with_remote()
         elif choice == "13":
+            show_recent_logs()
+        elif choice == "14":
             print("\n\t... Exiting Git Manager ...\n")
             break
         else:
             print("\nInvalid choice. Please select a valid option.\n")
+
+def setup_logging():
+    """Configures the logging system."""
+    log_file = "git_manager.log"
+    logging.basicConfig(
+        filename=log_file,
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # Add log file to gitignore if not already there
+    if os.path.exists(".gitignore"):
+        with open(".gitignore", "r") as f:
+            content = f.read()
+        if "git_manager.log" not in content:
+            with open(".gitignore", "a") as f:
+                f.write("\n# Git Manager logs\ngit_manager.log\n")
+    else:
+        with open(".gitignore", "w") as f:
+            f.write("# Git Manager logs\ngit_manager.log\n")
+
+def log_operation(operation, status, message=""):
+    """Logs an operation and its outcome."""
+    level = logging.INFO if status == "SUCCESS" else logging.ERROR
+    log_msg = f"{operation}: {status}"
+    if message:
+        log_msg += f" - {message}"
+    logging.log(level, log_msg)
+
+def show_recent_logs():
+    """Displays recent log entries to the user."""
+    if not os.path.exists("git_manager.log"):
+        print("\nNo logs available yet.")
+        return
+        
+    print("\nRecent Operations:")
+    with open("git_manager.log", "r") as f:
+        # Get last 10 lines
+        lines = f.readlines()[-10:]
+        for line in lines:
+            # Format the log entry for display
+            parts = line.split(" - ", 2)
+            if len(parts) >= 3:
+                timestamp = parts[0]
+                level = parts[1]
+                message = parts[2].strip()
+                print(f"{timestamp} | {level} | {message}")
+    print()
 
 if __name__ == "__main__":
     menu()
