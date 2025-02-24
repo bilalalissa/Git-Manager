@@ -664,106 +664,101 @@ def verify_git_repo():
 def sync_with_remote():
     """Synchronizes local repository with remote."""
     try:
-        # First check if we have any changes to commit
+        # Get current status
         status = subprocess.run(
-            "git status --porcelain",
+            "git status",
+            shell=True,
+            capture_output=True,
+            text=True
+        ).stdout
+        print("\nCurrent Status:")
+        print(status)
+        
+        config = load_config()
+        tracked_files = config.get("tracked_files", [])
+        
+        # Check if we have any tracked files with changes
+        changes_to_commit = False
+        if tracked_files:
+            if tracked_files == "all":
+                # Stage all files except those in .gitignore
+                subprocess.run(
+                    "git add .",
+                    shell=True,
+                    check=True,
+                    capture_output=True
+                )
+                changes_to_commit = True
+            else:
+                # Stage only specific tracked files
+                for file in tracked_files:
+                    if os.path.exists(file):
+                        file_status = subprocess.run(
+                            f"git status --porcelain {file}",
+                            shell=True,
+                            capture_output=True,
+                            text=True
+                        ).stdout.strip()
+                        if file_status:
+                            subprocess.run(
+                                f"git add {file}",
+                                shell=True,
+                                check=True,
+                                capture_output=True
+                            )
+                            changes_to_commit = True
+        
+        if changes_to_commit:
+            try:
+                # Commit changes
+                commit_result = subprocess.run(
+                    'git commit -m "Sync: Updated tracked files"',
+                    shell=True,
+                    capture_output=True,
+                    text=True
+                )
+                
+                if commit_result.returncode == 0:
+                    # Push changes
+                    push_result = subprocess.run(
+                        "git push origin main",
+                        shell=True,
+                        capture_output=True,
+                        text=True
+                    )
+                    if push_result.returncode == 0:
+                        print("\nChanges committed and pushed successfully")
+                        log_operation("Sync", "SUCCESS", "Changes synchronized with remote")
+                    else:
+                        print("\nPush failed. Error message:")
+                        print(push_result.stderr)
+                else:
+                    if "nothing to commit" in commit_result.stderr:
+                        print("\nNo changes to commit in tracked files")
+                    else:
+                        print("\nCommit failed. Error message:")
+                        print(commit_result.stderr)
+        else:
+            print("\nNo changes detected in tracked files")
+            
+        # Show untracked files as information
+        untracked = subprocess.run(
+            "git ls-files --others --exclude-standard",
             shell=True,
             capture_output=True,
             text=True
         ).stdout.strip()
         
-        if status:
-            # Get detailed status
-            detailed_status = subprocess.run(
-                "git status",
-                shell=True,
-                capture_output=True,
-                text=True
-            ).stdout
-            print("\nCurrent Status:")
-            print(detailed_status)
-            
-            # Stage changes
-            config = load_config()
-            tracked_files = config.get("tracked_files", [])
-            
-            if tracked_files:
-                try:
-                    if tracked_files == "all":
-                        subprocess.run(
-                            "git add .",
-                            shell=True,
-                            check=True,
-                            capture_output=True
-                        )
-                    else:
-                        for file in tracked_files:
-                            if os.path.exists(file):
-                                subprocess.run(
-                                    f"git add {file}",
-                                    shell=True,
-                                    check=True,
-                                    capture_output=True
-                                )
-                    
-                    # Try to commit with more detailed error handling
-                    try:
-                        commit_result = subprocess.run(
-                            'git commit -m "Sync: Updated tracked files"',
-                            shell=True,
-                            capture_output=True,
-                            text=True
-                        )
-                        if commit_result.returncode != 0:
-                            print("\nCommit failed. Error message:")
-                            print(commit_result.stderr)
-                            if "nothing to commit" in commit_result.stderr:
-                                print("\nNo changes to commit")
-                            elif "please tell me who you are" in commit_result.stderr:
-                                print("\nGit user not configured. Please set user.name and user.email:")
-                                name = input("Enter your name: ")
-                                email = input("Enter your email: ")
-                                subprocess.run(f'git config --global user.name "{name}"', shell=True)
-                                subprocess.run(f'git config --global user.email "{email}"', shell=True)
-                                # Try commit again
-                                subprocess.run(
-                                    'git commit -m "Sync: Updated tracked files"',
-                                    shell=True,
-                                    check=True
-                                )
-                            return
-                        
-                        # Push changes
-                        push_result = subprocess.run(
-                            "git push origin main",
-                            shell=True,
-                            capture_output=True,
-                            text=True
-                        )
-                        if push_result.returncode != 0:
-                            print("\nPush failed. Error message:")
-                            print(push_result.stderr)
-                            return
-                            
-                        print("\nChanges committed and pushed successfully")
-                        
-                    except subprocess.CalledProcessError as e:
-                        print(f"\nError during commit/push: {str(e)}")
-                        return
-                        
-                except subprocess.CalledProcessError as e:
-                    print(f"\nError staging files: {str(e)}")
-                    return
-            
-        else:
-            print("\nNo changes to sync")
-            
-        print("\nSync completed")
-        log_operation("Sync", "SUCCESS", "Repository synchronized with remote")
+        if untracked:
+            print("\nUntracked files (not included in sync):")
+            for file in untracked.split('\n'):
+                print(f"  {file}")
+            print("\nUse 'Track Files' option to start tracking these files if needed.")
         
     except subprocess.CalledProcessError as e:
-        print(f"\nError syncing with remote: {str(e)}")
-        print("Error details:", e.stderr if hasattr(e, 'stderr') else "No additional details")
+        print(f"\nError during sync: {str(e)}")
+        if hasattr(e, 'stderr'):
+            print("Error details:", e.stderr)
         log_operation("Sync", "ERROR", f"Sync failed: {str(e)}")
 
 def verify_config_files():
