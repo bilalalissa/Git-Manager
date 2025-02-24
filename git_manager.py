@@ -267,14 +267,28 @@ def edit_git_config():
 
 def remove_from_tracking():
     """Allows user to remove files from Git tracking."""
+    config = load_config()
     while True:
         file_name = input("\nEnter file to remove from tracking (or type 'done' to finish): ")
         if file_name.lower() == "done":
             break
-        subprocess.run(f"git rm --cached {file_name}", shell=True)
-        print(f" - Removed {file_name} from tracking.")
-    subprocess.run("git commit -m 'Removed files from tracking'", shell=True)
-    subprocess.run("git push origin main", shell=True)
+            
+        if file_name in config["tracked_files"]:
+            config["tracked_files"].remove(file_name)
+            subprocess.run(f"git rm --cached {file_name}", shell=True)
+            print(f" - Removed {file_name} from tracking.")
+            log_operation("Tracking", "SUCCESS", f"Removed {file_name} from tracking")
+        else:
+            print(f" - {file_name} is not in tracking list.")
+            
+    # Save the updated configuration
+    if save_config(config):
+        subprocess.run('git commit -m "Removed files from tracking"', shell=True)
+        subprocess.run("git push origin main", shell=True)
+        print("\nChanges saved and committed successfully")
+    else:
+        print("\nFailed to save tracking changes")
+        log_operation("Tracking", "ERROR", "Failed to save tracking changes")
 
 def remove_git_config():
     """Removes Git configuration from the folder and the application settings."""
@@ -316,11 +330,42 @@ def create_github_repo():
     else:
         print(f"\n\tFailed to create repository: {response.json()}\nCheck your GitHub token permissions.\n")
 
-def show_tracking_files():
-    """Displays the list of tracked files."""
-    tracked_files = subprocess.run("git ls-files", shell=True, capture_output=True, text=True).stdout.strip()
-    print("\nTracked Files:")
-    print(tracked_files if tracked_files else "No tracked files found.\n")
+def show_tracked_files():
+    """Displays all files currently being tracked."""
+    config = load_config()
+    print("\nCurrently tracked files:")
+    if config["tracked_files"] == "all":
+        print("All files in repository (except those in .gitignore)")
+        # Show actual tracked files from git, excluding those in .gitignore
+        result = subprocess.run(
+            "git ls-files",
+            shell=True,
+            capture_output=True,
+            text=True
+        )
+        if result.stdout:
+            ignored_files = set()
+            if os.path.exists(".gitignore"):
+                with open(".gitignore", "r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#"):
+                            ignored_files.add(line)
+            
+            for file in result.stdout.splitlines():
+                if not any(fnmatch.fnmatch(file, pattern) for pattern in ignored_files):
+                    print(f"- {file}")
+    else:
+        if not config["tracked_files"]:
+            print("No files are currently being tracked")
+        else:
+            for file in config["tracked_files"]:
+                if os.path.exists(file):
+                    status = "✓" if verify_tracked_file(file) else "!"
+                    print(f"- {file} {status}")
+                else:
+                    print(f"- {file} (missing)")
+    print()
 
 def show_repo_status():
     """Displays the current Git repository status."""
@@ -1065,34 +1110,6 @@ def verify_tracked_file(file_name):
     if config["tracked_files"] == "all":
         return True
     return file_name in config["tracked_files"]
-
-def show_tracked_files():
-    """Displays all files currently being tracked."""
-    config = load_config()
-    print("\nCurrently tracked files:")
-    if config["tracked_files"] == "all":
-        print("All files in repository")
-        # Show actual tracked files from git
-        result = subprocess.run(
-            "git ls-files",
-            shell=True,
-            capture_output=True,
-            text=True
-        )
-        if result.stdout:
-            for file in result.stdout.splitlines():
-                print(f"- {file}")
-    else:
-        if not config["tracked_files"]:
-            print("No files are currently being tracked")
-        else:
-            for file in config["tracked_files"]:
-                if os.path.exists(file):
-                    status = "✓" if verify_tracked_file(file) else "!"
-                    print(f"- {file} {status}")
-                else:
-                    print(f"- {file} (missing)")
-    print()
 
 if __name__ == "__main__":
     menu()
