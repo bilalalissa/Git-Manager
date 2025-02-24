@@ -147,43 +147,61 @@ def edit_config():
                     # Revert changes if save failed
                     config["auto_commit"] = False
                     print("\nFailed to save configuration. Auto-commit not enabled.")
+                    log_operation("Configuration", "ERROR", "Failed to save auto-commit settings")
             else:  # If disabling auto-commit
                 if save_config(config):
                     print("\nAuto-Commit disabled")
+                    log_operation("Configuration", "SUCCESS", "Auto-commit disabled")
                 else:
                     # Revert changes if save failed
                     config["auto_commit"] = True
                     print("\nFailed to save configuration")
+                    log_operation("Configuration", "ERROR", "Failed to save auto-commit settings")
             
         elif choice == "2":
-            old_value = config["daemon_mode"]
-            config["daemon_mode"] = not config["daemon_mode"]
-            if save_config(config):
-                print(f"\nDaemon Mode {'Enabled' if config['daemon_mode'] else 'Disabled'}")
-            else:
-                # Revert changes if save failed
-                config["daemon_mode"] = old_value
-                print("\nFailed to save configuration")
+            try:
+                old_value = config.get("daemon_mode", False)
+                config["daemon_mode"] = not old_value
+                
+                if save_config(config):
+                    new_state = "Enabled" if config["daemon_mode"] else "Disabled"
+                    print(f"\nDaemon Mode {new_state}")
+                    log_operation("Configuration", "SUCCESS", f"Daemon mode {new_state.lower()}")
+                else:
+                    config["daemon_mode"] = old_value
+                    print("\nFailed to save daemon mode configuration")
+                    log_operation("Configuration", "ERROR", "Failed to save daemon mode settings")
+            except Exception as e:
+                print(f"\nError updating daemon mode: {str(e)}")
+                log_operation("Configuration", "ERROR", f"Daemon mode error: {str(e)}")
             
         elif choice == "3" and config["auto_commit"]:
-            old_interval = config["commit_interval"]
-            interval = input("\nEnter new commit interval in minutes: ")
+            old_interval = config.get("commit_interval", 30)
             try:
-                config["commit_interval"] = int(interval)
-                if save_config(config):
-                    print(f"\nCommit interval updated to {interval} minutes")
+                interval = input("\nEnter new commit interval in minutes: ")
+                new_interval = int(interval)
+                if new_interval > 0:
+                    config["commit_interval"] = new_interval
+                    if save_config(config):
+                        print(f"\nCommit interval updated to {new_interval} minutes")
+                        log_operation("Configuration", "SUCCESS", f"Commit interval set to {new_interval} minutes")
+                    else:
+                        config["commit_interval"] = old_interval
+                        print("\nFailed to save configuration")
+                        log_operation("Configuration", "ERROR", "Failed to save commit interval")
                 else:
-                    # Revert changes if save failed
-                    config["commit_interval"] = old_interval
-                    print("\nFailed to save configuration")
+                    print("\nInterval must be greater than 0")
+                    log_operation("Configuration", "ERROR", "Invalid commit interval value")
             except ValueError:
                 print("\nInvalid interval. Keeping current setting.")
+                log_operation("Configuration", "ERROR", "Invalid commit interval format")
         else:
             print("\nInvalid choice.")
             return
             
     except Exception as e:
         print(f"\nError updating configuration: {str(e)}")
+        log_operation("Configuration", "ERROR", f"Configuration update error: {str(e)}")
 
 def show_git_config():
     """Displays local Git configuration."""
