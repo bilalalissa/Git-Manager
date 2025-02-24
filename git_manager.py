@@ -277,7 +277,8 @@ def auto_commit_process():
         subprocess.run(
             "git config pull.rebase false",  # Use merge strategy
             shell=True,
-            check=True
+            check=True,
+            capture_output=True  # Capture output to hide it
         )
     except Exception:
         pass
@@ -321,15 +322,16 @@ def auto_commit_process():
             
             if changes_detected:
                 try:
-                    # First, fetch to check for remote changes
+                    # First, fetch to check for remote changes (silently)
                     subprocess.run(
                         "git fetch origin",
                         shell=True,
                         check=True,
-                        timeout=30
+                        timeout=30,
+                        capture_output=True
                     )
                     
-                    # Check if we need to pull
+                    # Check if we need to pull (silently)
                     status = subprocess.run(
                         "git status -uno",
                         shell=True,
@@ -340,25 +342,33 @@ def auto_commit_process():
                     need_pull = "Your branch is behind" in status.stdout
                     
                     if need_pull:
-                        # Reset any local changes
+                        # Reset any local changes (silently)
                         subprocess.run(
                             "git reset --hard HEAD",
                             shell=True,
                             check=True,
-                            timeout=30
+                            timeout=30,
+                            capture_output=True
                         )
                         
-                        # Pull remote changes
+                        # Pull remote changes (silently)
                         subprocess.run(
                             "git pull origin main",
                             shell=True,
                             check=True,
-                            timeout=30
+                            timeout=30,
+                            capture_output=True
                         )
                     
-                    # Stage only tracked files
+                    # Stage only tracked files (silently)
                     if tracked_files == "all":
-                        subprocess.run("git add .", shell=True, check=True, timeout=30)
+                        subprocess.run(
+                            "git add .",
+                            shell=True,
+                            check=True,
+                            timeout=30,
+                            capture_output=True
+                        )
                     else:
                         for file in tracked_files:
                             if os.path.exists(file):
@@ -366,10 +376,11 @@ def auto_commit_process():
                                     f"git add {file}",
                                     shell=True,
                                     check=True,
-                                    timeout=30
+                                    timeout=30,
+                                    capture_output=True
                                 )
                     
-                    # Check if we have changes to commit
+                    # Check if we have changes to commit (silently)
                     status = subprocess.run(
                         "git status --porcelain",
                         shell=True,
@@ -378,20 +389,22 @@ def auto_commit_process():
                     )
                     
                     if status.stdout.strip():
-                        # Commit changes
+                        # Commit changes (silently)
                         subprocess.run(
                             'git commit -m "Auto-commit: Changes in tracked files"',
                             shell=True,
                             check=True,
-                            timeout=30
+                            timeout=30,
+                            capture_output=True
                         )
                         
-                        # Push changes
+                        # Push changes (silently)
                         subprocess.run(
                             "git push origin main",
                             shell=True,
                             check=True,
-                            timeout=30
+                            timeout=30,
+                            capture_output=True
                         )
                         
                         print("\nChanges committed and pushed successfully")
