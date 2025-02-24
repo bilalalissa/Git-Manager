@@ -738,6 +738,9 @@ def sync_with_remote():
                     else:
                         print("\nCommit failed. Error message:")
                         print(commit_result.stderr)
+            except Exception as e:
+                print(f"\nError during sync: {str(e)}")
+                log_operation("Sync", "ERROR", f"Sync failed: {str(e)}")
         else:
             print("\nNo changes detected in tracked files")
             
