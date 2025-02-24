@@ -393,7 +393,6 @@ def auto_commit_process():
             changes_detected = False
             
             if tracked_files == "all":
-                # If tracking all files, use git status
                 status = subprocess.run(
                     "git status --porcelain",
                     shell=True,
@@ -402,7 +401,6 @@ def auto_commit_process():
                 )
                 changes_detected = bool(status.stdout.strip())
             else:
-                # Check specific tracked files
                 for file in tracked_files:
                     if os.path.exists(file):
                         file_status = subprocess.run(
@@ -417,11 +415,10 @@ def auto_commit_process():
             
             if changes_detected:
                 try:
+                    # Stage changes first
                     if tracked_files == "all":
-                        # Stage all changes
                         subprocess.run("git add .", shell=True, check=True, timeout=30)
                     else:
-                        # Stage only tracked files
                         for file in tracked_files:
                             if os.path.exists(file):
                                 subprocess.run(
@@ -439,15 +436,31 @@ def auto_commit_process():
                         timeout=30
                     )
                     
-                    # Push changes
-                    subprocess.run(
-                        "git push origin main",
-                        shell=True,
-                        check=True,
-                        timeout=30
-                    )
+                    # Try to push directly first
+                    try:
+                        subprocess.run(
+                            "git push origin main",
+                            shell=True,
+                            check=True,
+                            timeout=30
+                        )
+                    except subprocess.CalledProcessError:
+                        # If push fails, try pull with allow-unrelated-histories
+                        subprocess.run(
+                            "git pull origin main --allow-unrelated-histories",
+                            shell=True,
+                            check=True,
+                            timeout=30
+                        )
+                        # Try push again
+                        subprocess.run(
+                            "git push origin main",
+                            shell=True,
+                            check=True,
+                            timeout=30
+                        )
                     
-                    print("\nTracked files auto-committed and pushed successfully")
+                    print("\nChanges committed and pushed successfully")
                     error_count = 0  # Reset error count on success
                     
                 except subprocess.TimeoutExpired:
